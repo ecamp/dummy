@@ -22,7 +22,6 @@ jobs:
         env:
           GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
 
-
       - name: set deployment status to in progress
         id: start_deployment
         uses: octokit/request-action@v2.x
@@ -35,5 +34,21 @@ jobs:
           environment_url: https://dev.ecamp3.ch
           log_url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           state: in_progress
+        env:
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: set deployment status to success
+        id: finish_deployment
+        if: ${{ github.event.action == 'labeled' && github.event.label.name == 'deployed' }}
+        uses: octokit/request-action@v2.x
+        with:
+          route: POST /repos/:repository/deployments/:deployment/statuses
+          repository: ${{ github.repository }}
+          deployment: ${{ fromJson(steps.create_deployment.outputs.data).id }}
+          description: "Deployment finished"
+          environment: dev
+          environment_url: https://dev.ecamp3.ch
+          log_url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          state: success
         env:
           GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
