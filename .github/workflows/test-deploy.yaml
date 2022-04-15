@@ -24,9 +24,9 @@ jobs:
   delete-old-deployments:
     name: Inactivate deployment
     runs-on: ubuntu-latest
-    if: ${{ github.event.action == 'closed' }}
     needs:
       - find-old-deployments
+    if: needs.find-old-deployments.outputs.items[0] != null
     strategy:
       fail-fast: false
       matrix:

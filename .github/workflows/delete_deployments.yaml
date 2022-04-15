@@ -1,0 +1,40 @@
+name: Delete Deployments
+
+on:
+  workflow_dispatch:
+
+jobs:
+  find-old-deployments:
+    name: Get deployments for this PR
+    runs-on: ubuntu-latest
+    outputs:
+      items: ${{ steps.list_deployments.outputs.data }}
+    steps:
+      - name: list deployments
+        id: list_deployments
+        uses: octokit/request-action@v2.x
+        with:
+          route: GET /repos/:repository/deployments
+          repository: ${{ github.repository }}
+        env:
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+
+  delete-old-deployments:
+    name: Inactivate deployment
+    runs-on: ubuntu-latest
+    needs:
+      - find-old-deployments
+    strategy:
+      fail-fast: false
+      matrix:
+        item: ${{ fromJSON(needs.find-old-deployments.outputs.items) }}
+    steps:
+      - name: set deployments inactive
+        id: inactivate_deployments
+        uses: octokit/request-action@v2.x
+        with:
+          route: DELETE /repos/:repository/deployments/:deployment_id
+          repository: ${{ github.repository }}
+          deployment_id: ${{ matrix.item.id }}
+        env:
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
