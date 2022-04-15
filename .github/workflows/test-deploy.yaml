@@ -2,13 +2,54 @@ name: Deploy dev and feature branches
 
 on:
   pull_request_target:
-    types: [ labeled, unlabeled, closed ]
+    types: [ labeled, closed ]
 
 jobs:
-  test:
+  find-old-deployments:
     name: Test if label is present
     runs-on: ubuntu-latest
+    if: ${{ github.event.action == 'closed' }}
+    outputs:
+      environment: ${{ steps.list_deployments.outputs.data }}
     steps:
+      - name: list deployments
+        id: list_deployments
+        uses: octokit/request-action@v2.x
+        with:
+          route: GET /repos/:repository/deployments
+          repository: ${{ github.repository }}
+          task: 'pr${{ github.event.pull_request.number }}'
+        env:
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+
+  delete-old-deployments:
+    name: Inactivate deployment ${{ matrix.item.id }}
+    runs-on: ubuntu-latest
+    if: ${{ github.event.action == 'closed' }}
+    needs:
+      - find-old-deployments
+    strategy:
+      fail-fast: false
+      matrix:
+        item: ${{ fromJSON(needs.find-old-deployments.outputs.environment) }}
+    steps:
+      - name: set deployments inactive
+        id: inactivate_deployments
+        uses: octokit/request-action@v2.x
+        with:
+          route: POST /repos/:repository/deployments/:deployment_id/statuses
+          repository: ${{ github.repository }}
+          deployment_id: ${{ matrix.item.id }}
+          state: inactive
+        env:
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+
+  create-deployment:
+    name: Test if label is present
+    runs-on: ubuntu-latest
+    if: ${{ github.event.action == 'labeled' && github.event.pull_request.state == 'open' }}
+    steps:
+
       - name: create deployment
         id: create_deployment
         uses: octokit/request-action@v2.x
@@ -16,39 +57,118 @@ jobs:
           route: POST /repos/:repository/deployments
           repository: ${{ github.repository }}
           ref: ${{ github.event.pull_request.head.sha }}
-          environment: testingdev
+          environment: testing_env
           required_contexts: '[]'
+          task: 'pr${{ github.event.pull_request.number }}'
+          transient_environment: true
           auto_merge: false
         env:
           GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
 
       - name: set deployment status to in progress
-        id: start_deployment
+        id: queued_deployment
+        uses: octokit/request-action@v2.x
+        with:
+          route: POST /repos/:repository/deployments/:deployment/statuses
+          repository: ${{ github.repository }}
+          deployment: ${{ fromJson(steps.create_deployment.outputs.data).id }}
+          description: "Deployment pending"
+          environment: testing_env
+          auto_inactive: false
+          environment_url: https://pr${{ github.event.pull_request.number }}.ecamp3.ch/
+          log_url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          state: queued
+        env:
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Sleep for 10 seconds
+        run: sleep 10s
+
+      - name: set deployment status to in progress
+        id: pending_deployment
+        uses: octokit/request-action@v2.x
+        with:
+          route: POST /repos/:repository/deployments/:deployment/statuses
+          repository: ${{ github.repository }}
+          deployment: ${{ fromJson(steps.create_deployment.outputs.data).id }}
+          description: "Deployment pending"
+          environment: testing_env
+          auto_inactive: false
+          environment_url: https://pr${{ github.event.pull_request.number }}.ecamp3.ch/
+          log_url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          state: pending
+        env:
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Sleep for 10 seconds
+        run: sleep 10s
+
+      - name: set deployment status to in progress
+        id: in_progress_deployment
         uses: octokit/request-action@v2.x
         with:
           route: POST /repos/:repository/deployments/:deployment/statuses
           repository: ${{ github.repository }}
           deployment: ${{ fromJson(steps.create_deployment.outputs.data).id }}
           description: "Deployment in progress"
-          environment: dev
-          environment_url: https://dev.ecamp3.ch
+          environment: testing_env
+          auto_inactive: false
+          environment_url: https://pr${{ github.event.pull_request.number }}.ecamp3.ch/
           log_url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           state: in_progress
         env:
           GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
 
+      - name: Sleep for 10 seconds
+        run: sleep 10s
+
       - name: set deployment status to success
-        id: finish_deployment
-        if: ${{ github.event.action == 'labeled' && github.event.label.name == 'deployed' }}
+        id: success_deployment
+        if: ${{ contains(github.event.pull_request.labels.*.name, 'success') }}
         uses: octokit/request-action@v2.x
         with:
           route: POST /repos/:repository/deployments/:deployment/statuses
           repository: ${{ github.repository }}
           deployment: ${{ fromJson(steps.create_deployment.outputs.data).id }}
           description: "Deployment finished"
-          environment: dev
-          environment_url: https://dev.ecamp3.ch
+          environment: testing_env
+          auto_inactive: false
+          environment_url: https://pr${{ github.event.pull_request.number }}.ecamp3.ch/
           log_url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           state: success
+        env:
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: set deployment status to failure
+        id: failure_deployment
+        if: ${{ contains(github.event.pull_request.labels.*.name, 'failure') }}
+        uses: octokit/request-action@v2.x
+        with:
+          route: POST /repos/:repository/deployments/:deployment/statuses
+          repository: ${{ github.repository }}
+          deployment: ${{ fromJson(steps.create_deployment.outputs.data).id }}
+          description: "Deployment finished"
+          environment: testing_env
+          auto_inactive: false
+          environment_url: https://pr${{ github.event.pull_request.number }}.ecamp3.ch/
+          log_url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          state: failure
+        env:
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: set deployment status to error
+        id: error_deployment
+        if: ${{ contains(github.event.pull_request.labels.*.name, 'error') }}
+        uses: octokit/request-action@v2.x
+        with:
+          route: POST /repos/:repository/deployments/:deployment/statuses
+          repository: ${{ github.repository }}
+          deployment: ${{ fromJson(steps.create_deployment.outputs.data).id }}
+          description: "Deployment finished"
+          environment: testing_env
+          auto_inactive: false
+          environment_url: https://pr${{ github.event.pull_request.number }}.ecamp3.ch/
+          log_url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          state: error
         env:
           GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
