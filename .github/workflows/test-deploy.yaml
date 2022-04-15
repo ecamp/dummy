@@ -1,0 +1,12 @@
+name: Deploy dev and feature branches
+
+on:
+  pull_request_target:
+    types: [ labeled, unlabeled, closed ]
+
+jobs:
+  test:
+    name: Test if label is present
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo '${{ toJSON(github) }}'
